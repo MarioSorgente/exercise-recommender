@@ -7,7 +7,7 @@ def load_model_and_data():
     """
     1) Loads the SentenceTransformer model: 'all-MiniLM-L6-v2'.
     2) Reads the Excel file 'Exercise_Database.xlsx', which must have columns:
-       Exercise, Short YouTube Demonstration, Target Muscle Group,
+       Exercise, Video, Target Muscle Group,
        Primary Equipment, Posture, Body Region.
     3) Builds a 'combined_text' field by concatenating relevant columns.
     4) Encodes each row into an embedding vector for semantic search.
@@ -48,7 +48,7 @@ def recommend_exercises(user_query, model, df, exercise_embeddings, top_n=5):
     
     # Build a DataFrame of the top matches
     results = df.iloc[top_indices][
-        ['Exercise', 'Short YouTube Demonstration', 'Target Muscle Group',
+        ['Exercise', 'Video', 'Target Muscle Group',
          'Primary Equipment', 'Posture', 'Body Region']
     ].copy()
     results['Similarity'] = similarities[top_indices]
@@ -75,7 +75,7 @@ def main():
             
             for idx, row in results.iterrows():
                 st.write(f"**{idx+1}.** {row['Exercise']}")
-                st.write(f"- **YouTube:** {row['Short YouTube Demonstration']}")
+                st.write(f"- **YouTube:** {row['Video']}")
                 st.write(f"- **Target Muscle Group:** {row['Target Muscle Group']}")
                 st.write(f"- **Primary Equipment:** {row['Primary Equipment']}")
                 st.write(f"- **Posture:** {row['Posture']}")
