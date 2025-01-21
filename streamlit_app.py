@@ -76,7 +76,7 @@ def main():
             for idx, row in results.iterrows():
                 st.write(f"**{idx+1}.** {row['Exercise']}")
                 if row['Video'] and row['Video'].lower() != "nodata":
-                    st.markdown(f"[Video demonstration]({row['Video']})")
+                    st.video(row['Video'])
                 else:
                     st.write("No video available")
                 st.write(f"- **Target Muscle Group:** {row['Target Muscle Group']}")
