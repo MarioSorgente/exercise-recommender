@@ -75,7 +75,7 @@ def main():
             
             for idx, row in results.iterrows():
                 st.write(f"**{idx+1}.** {row['Exercise']}")
-                st.video(row['Video'])
+                st.write("Video link:", row['Video'])
                 st.write(f"- **Target Muscle Group:** {row['Target Muscle Group']}")
                 st.write(f"- **Primary Equipment:** {row['Primary Equipment']}")
                 st.write(f"- **Posture:** {row['Posture']}")
