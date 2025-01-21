@@ -5,29 +5,28 @@ from sentence_transformers import SentenceTransformer, util
 # A simple set of muscle keywords we want to ensure coverage for.
 # Feel free to add more or refine these.
 MUSCLE_KEYWORDS = [
-    "neck", "shoulder", "shoulders", "back", "chest", "arm", "arms", "bicep", "tricep",
-    "core", "abs", "abdominals", "hip", "hips", "glute", "glutes", "leg", "legs",
-    "hamstring", "calf", "calves"
+    "neck", "shoulder", "shoulders", "back", "chest", "arm", "arms",
+    "bicep", "tricep", "core", "abs", "abdominals", "hip", "hips",
+    "glute", "glutes", "leg", "legs", "hamstring", "calf", "calves"
 ]
 
 @st.cache_resource
 def load_model_and_data():
     """
-    1) Loads the SentenceTransformer model: 'all-MiniLM-L6-v2'.
-    2) Reads the Excel file 'Exercise_Database.xlsx' with columns:
+    1) Load the 'all-MiniLM-L6-v2' SentenceTransformer model.
+    2) Read 'Exercise_Database.xlsx' which has columns:
        - Exercise
        - Video
        - Target Muscle Group
        - Primary Equipment
        - Posture
        - Body Region
-    3) Builds a 'combined_text' field from relevant columns.
-    4) Encodes each row for semantic search.
+    3) Create a 'combined_text' for semantic search.
+    4) Encode each row into embeddings.
     """
     model = SentenceTransformer('all-MiniLM-L6-v2')
     df = pd.read_excel('Exercise_Database.xlsx')
 
-    # Combine columns into a single text field
     df['combined_text'] = (
         df['Target Muscle Group'].fillna('') + ' ' +
         df['Body Region'].fillna('') + ' ' +
@@ -36,27 +35,25 @@ def load_model_and_data():
         df['Primary Equipment'].fillna('')
     )
 
-    # Create embeddings for each row
     exercise_embeddings = model.encode(df['combined_text'].tolist(), convert_to_tensor=True)
-
     return model, df, exercise_embeddings
 
 def recommend_exercises(user_query, model, df, exercise_embeddings, top_n=10):
     """
-    1) Computes similarity between the user_query and each row.
-    2) Ranks results by similarity.
-    3) Skips any row where Video == "NoData" (or empty).
-    4) Ensures each muscle in user_query is covered at least once if possible.
-    5) Returns up to 'top_n' final results.
+    1) Compute similarity between user_query and each row.
+    2) Sort by similarity descending.
+    3) Skip rows where 'Video' is "NoData" or empty.
+    4) Ensure coverage for any muscle keywords the user mentions.
+    5) Return up to 'top_n' results with embedded video if available.
     """
-    # Create user query embedding
+    # Create user embedding
     query_embedding = model.encode(user_query, convert_to_tensor=True)
     similarities = util.cos_sim(query_embedding, exercise_embeddings)[0].cpu().numpy()
 
     # Sort from highest to lowest similarity
     all_indices = similarities.argsort()[::-1]
 
-    # Build a DataFrame with similarities
+    # Build a DataFrame with sorted rows
     all_results = df.iloc[all_indices].copy()
     all_results['Similarity'] = similarities[all_indices].round(4)
 
@@ -64,67 +61,70 @@ def recommend_exercises(user_query, model, df, exercise_embeddings, top_n=10):
     user_lower = user_query.lower()
     mentioned_muscles = [kw for kw in MUSCLE_KEYWORDS if kw in user_lower]
 
-    # We'll collect potential exercises from best to worst, skipping "NoData" for video.
-    selected_exercises = []
-    used_indices = set()
-
-    # First pass: pick exercises for overall query, skipping "NoData"
+    # STEP 1: Collect valid-video exercises, skipping "NoData"
+    selected_exercises = []  # Will store (index, row) pairs
     for i, row in all_results.iterrows():
+        video_str = str(row.get('Video', '')).strip().lower()
+        if video_str not in ("nodata", ""):
+            selected_exercises.append((i, row))  # store the row index + row data
+
         if len(selected_exercises) >= 2 * top_n:
-            # We won't need more than 2*top_n in worst case
+            # We won't need more than 2*top_n in the worst case
             break
-        
-        video_str = str(row.get('Video', '')).lower()
-        if video_str == "nodata" or video_str.strip() == "":
-            # Skip if no valid video
-            continue
 
-        selected_exercises.append(row)
-        used_indices.add(i)
-
-    # We now have a list of valid-video exercises in descending similarity.
-    # Next: ensure each mentioned muscle is covered.
-    # We'll look for an exercise that references that muscle in 'combined_text'
-    # if not already covered.
-    def covers_muscle(exercise_row, muscle_keyword):
-        # Check if the row's combined_text includes the muscle keyword
-        # or the muscle is found in any relevant column.
-        text = exercise_row['combined_text'].lower()
-        return muscle_keyword in text
-
+    # STEP 2: Ensure coverage of mentioned muscles
+    # We'll pick exercises in descending similarity, adding them if they help
+    # cover new muscles or if we haven't reached top_n yet.
     final_list = []
+    used_indices = set()   # to avoid duplicates by index
     covered_muscles = set()
 
-    for ex in selected_exercises:
-        # Add exercise if it helps cover new muscles or if we don't yet have enough
-        if len(final_list) < top_n:
-            # Which muscles does this exercise help cover?
-            relevant = [m for m in mentioned_muscles if covers_muscle(ex, m)]
-            # If it covers at least one muscle that isn't covered yet, great
-            # or if we still haven't reached top_n, we add it
-            if any(m not in covered_muscles for m in relevant) or len(final_list) < len(mentioned_muscles):
-                final_list.append(ex)
-                for m in relevant:
-                    covered_muscles.add(m)
-        else:
+    def covers_muscle(row_data, muscle_keyword):
+        # Check if row's combined_text references the muscle
+        text = row_data['combined_text'].lower()
+        return muscle_keyword in text
+
+    # First pass: add exercises that help cover new muscles, or until we get top_n
+    for i, row_data in selected_exercises:
+        if len(final_list) >= top_n:
             break
 
-    # If we still haven't reached top_n, fill from the remainder
+        if i not in used_indices:
+            relevant_muscles = [
+                m for m in mentioned_muscles if covers_muscle(row_data, m)
+            ]
+            # We add the row if:
+            #  - it covers at least one new muscle not covered yet
+            #    OR
+            #  - we haven't yet added at least one exercise per mentioned muscle
+            #    OR
+            #  - we still haven't reached top_n in total
+            if any(m not in covered_muscles for m in relevant_muscles) \
+               or len(final_list) < len(mentioned_muscles):
+                final_list.append((i, row_data))
+                used_indices.add(i)
+                for m in relevant_muscles:
+                    covered_muscles.add(m)
+
+    # Second pass: if we still haven't reached top_n, fill from remainder
     if len(final_list) < top_n:
-        for ex in selected_exercises:
-            if ex not in final_list:
-                final_list.append(ex)
+        for i, row_data in selected_exercises:
             if len(final_list) >= top_n:
                 break
+            if i not in used_indices:
+                final_list.append((i, row_data))
+                used_indices.add(i)
 
-    # Convert final_list back to a DataFrame
-    results = pd.DataFrame(final_list).head(top_n).reset_index(drop=True)
+    # Convert final_list (index, row_data) to a DataFrame
+    # preserving original columns
+    rows_for_df = [row_data for (i, row_data) in final_list]
+    results = pd.DataFrame(rows_for_df).reset_index(drop=True)
 
-    return results
+    return results.head(top_n)
 
 def main():
     st.title("AI Exercise Recommender")
-    st.write("Describe your pain or target area, then click 'Get Recommendations' to see the top exercises.")
+    st.write("Describe your pain or target area, then click 'Get Recommendations' to see up to 10 exercises.")
 
     model, df, exercise_embeddings = load_model_and_data()
 
@@ -134,14 +134,13 @@ def main():
         if not user_input.strip():
             st.warning("Please enter a description first.")
         else:
-            # Get up to 10 exercises with coverage + skipping NoData
             results = recommend_exercises(user_input, model, df, exercise_embeddings, top_n=10)
             
             if results.empty:
                 st.error("No exercises found with a valid video. Try a different query.")
             else:
                 st.success(f"Top {len(results)} Exercises (up to 10):")
-                
+
                 for idx, row in results.iterrows():
                     # Card-style container
                     st.markdown(
@@ -152,15 +151,15 @@ def main():
                         """,
                         unsafe_allow_html=True
                     )
-                    
+
                     # Show the video if available
                     video_link = str(row.get('Video', '')).strip()
-                    if video_link.lower() != "nodata" and video_link != "":
+                    if video_link.lower() not in ("nodata", ""):
                         st.video(video_link)
                     else:
                         st.write("No video available")
 
-                    # Print other fields. We skip similarity to have a cleaner UI.
+                    # Display other fields; omit Similarity
                     st.markdown(
                         f"""
                             <p><strong>Target Muscle Group:</strong> {row.get('Target Muscle Group','')}</p>
