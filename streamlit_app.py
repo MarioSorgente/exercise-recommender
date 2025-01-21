@@ -51,6 +51,8 @@ def recommend_exercises(user_query, model, df, exercise_embeddings, top_n=5):
         ['Exercise', 'Video', 'Target Muscle Group',
          'Primary Equipment', 'Posture', 'Body Region']
     ].copy()
+    
+    # Optional: store similarity in case you need it internally
     results['Similarity'] = similarities[top_indices]
     
     return results.reset_index(drop=True)
@@ -71,20 +73,39 @@ def main():
             st.warning("Please enter a description first.")
         else:
             results = recommend_exercises(user_input, model, df, exercise_embeddings, top_n=5)
+            
+            # Inform the user how many exercises are returned
             st.success(f"Top {len(results)} Exercises:")
             
+            # Loop through each recommended exercise
             for idx, row in results.iterrows():
-                st.write(f"**{idx+1}.** {row['Exercise']}")
-                if row['Video'] and row['Video'].lower() != "nodata":
+                # Use HTML + inline CSS for a simple "card" style
+                st.markdown(
+                    f"""
+                    <div style="background-color: #f8f9fa; padding: 1rem; margin-bottom: 1rem; 
+                                border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h4 style="margin-top: 0;">{idx+1}. {row['Exercise']}</h4>
+                    """,
+                    unsafe_allow_html=True
+                )
+                
+                # Embed the video if there's a valid URL
+                if row['Video'] and str(row['Video']).lower() != "nodata":
                     st.video(row['Video'])
                 else:
                     st.write("No video available")
-                st.write(f"- **Target Muscle Group:** {row['Target Muscle Group']}")
-                st.write(f"- **Primary Equipment:** {row['Primary Equipment']}")
-                st.write(f"- **Posture:** {row['Posture']}")
-                st.write(f"- **Body Region:** {row['Body Region']}")
-                st.write(f"- **Similarity:** {row['Similarity']:.4f}")
-                st.write("---")
+                
+                # Continue the "card" using another markdown block
+                st.markdown(
+                    f"""
+                        <p><strong>Target Muscle Group:</strong> {row['Target Muscle Group']}</p>
+                        <p><strong>Primary Equipment:</strong> {row['Primary Equipment']}</p>
+                        <p><strong>Posture:</strong> {row['Posture']}</p>
+                        <p><strong>Body Region:</strong> {row['Body Region']}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
 if __name__ == "__main__":
     main()
